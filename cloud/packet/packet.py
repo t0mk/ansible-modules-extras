@@ -36,7 +36,7 @@ options:
     description:
       - Authenticating API token provided by Packet.
     required: true
-  hostname:
+  hostnames:
     description:
       - The hostname or ID of the device. Only used when state is 'present'.
     required: true when state is 'present', false otherwise.
@@ -203,6 +203,7 @@ devices:
 
 import os
 import time
+import uuid
 
 # debugging stuff, this should be at least commented in the PR
 import logging
@@ -219,6 +220,11 @@ except ImportError:
 
 # Enums for certain parameters for the API, documented at
 # https://www.packet.net/help/api/#page:devices,header:devices-devices-post
+
+_NAME_RE = '({0}|{0}{1}*{0})'.format('[a-zA-Z0-9]','[a-zA-Z0-9\-]')
+HOSTNAME_RE = '({0}\.)*{0}$'.format(_NAME_RE)
+MAX_DEVICES = 100
+
 
 PACKET_DEVICE_STATES = (
     'queued',
@@ -243,46 +249,6 @@ PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
 #            project = _project
 #            break
 #    return project
-
-
-def _find_device(packet_conn, project_id, device_hostname=None, device_id=None):
-    """
-    Given a device_id within a project_id, validates that the device exists
-    whether it is a proper ID or a name.
-    Returns the device if one was found, else None.
-    """
-    device = None
-    devices = packet_conn.list_devices(project_id, params={'per_page': 100})
-
-
-    for _device in devices:
-        if device_id in (_device.id, _device.hostname):
-            device = _device
-            break
-    return device
-
-
-def _wait_for_device_creation(packet_conn, device, wait_timeout):
-    wait_timeout = time.time() + wait_timeout
-    while wait_timeout > time.time():
-        time.sleep(1)
-
-        # Refresh the device info
-        device = packet_conn.get_device(device.id)
-
-        if device.state == 'active':
-            return
-        elif device.state == 'failed':
-            raise Exception('Device creation failed for %s' % device.id)
-        elif device.state in ('provisioning', 'queued'):
-            continue
-        else:
-            raise Exception('Unknown device state %s' % device.state)
-
-    raise Exception(
-        'Timed out waiting for device competion for %s' % device.id)
-
-
 
 
 def _serialize_device(device):
@@ -351,20 +317,89 @@ def _serialize_device(device):
                 device_data['private_ipv4'] = ipdata['address']
     return device_data
 
+
+def _is_valid_hostname(hostname):
+    return re.match(HOSTNAME_RE, hostname) is not None
+
+def _is_valid_uuid(myuuid):
+    try:
+        val = uuid.UUID(myuuid, version=4)
+    except ValueError:
+        return False
+    return str(val) == myuuid
+
+
 def _expand_hostname_specification(module):
-    hostname = module.params.get('hostname')
+    hostname_spec = module.params.get('hostnames')
     count = module.params.get('count')
+    if count == 0:
+        # this is the most basic case when "count" param is not specified,
+        # and "hostnames" is not a list => it's just a single (hopefully valid)
+        # hostname
+        return [hostname_spec]
     
     count_offset = module.params.get('count_offset')
     # this cool try/except is copied over from core/cloud/rackspace/rax.py
     try:
-        hostname % 0
+        hostname_spec % 0
     except TypeError as e:
         if e.message.startswith('not all'):
-            hostname = '%s%%02d' % hostname
+            hostname_spec = '%s%%02d' % hostname_spec
         else:
-            module.fail_json(msg=e.message)
-    return [hostname % i for i in range(count_offset, count_offset + count)]
+            raise e
+    return [hostname_spec % i for i in range(count_offset,count_offset + count)]
+
+
+def _get_hostname_list(module):
+    hostnames = module.params.get('hostnames')
+    if isinstance(hostnames, list) and (len(hostnames) > 0) and (count > 0):
+        _msg = ("If you have count>0, you should only specify one hostname "
+                "with the %d formatter, not a list of hostnames.")
+        raise Exception(_msg)
+
+    logging.debug(hostnames)
+    logging.debug(type(hostnames))
+    if not isinstance(hostnames, list):
+        # Once type='list' is specified in Ansible, the params should not be
+        # anything else, but to be defensive, I keep this code here
+        if "," in hostnames:
+            hostnames = [h.strip() for h in hostnames.split(",")]
+        else:
+            hostnames = _expand_hostname_specification(module)
+    #if (count > 0) and len(hostname) == 1:
+
+
+    for hn in hostnames:
+        if not _is_valid_hostname(hn):
+            raise Exception("Hostname '%s' does not seem to be valid" 
+                             % hn)
+
+    if len(hostnames) > MAX_DEVICES:
+        raise Exception("You specified too many devices, max is %d" %
+                         MAX_DEVICES)
+    return hostnames
+
+
+def _get_device_id_list(module):
+    device_ids = module.params.get('device_ids')
+
+    if not isinstance(device_ids, list):
+        if "," in device_ids:
+            device_ids = [di.strip() for di in  device_ids.split(",")]
+        else:
+            device_ids = [device_ids]
+
+    logging.debug(device_ids)
+    # trtying to be ultra user-friednly 
+    device_ids = [di.strip() for di in device_ids]
+    for di in device_ids:
+        if not _is_valid_uuid(di):
+            raise Exception("Device ID '%s' does not seem to be valid" % di)
+
+    if len(device_ids) > MAX_DEVICES:
+        raise Exception("You specified too many devices, max is %d" %
+                         MAX_DEVICES)
+    return device_ids
      
 
 def _create_device(module, packet_conn, project_id, hostname):
@@ -374,20 +409,15 @@ def _create_device(module, packet_conn, project_id, hostname):
     operating_system = module.params.get('operating_system')
     locked = module.params.get('locked')
 
-    try:
-        device = packet_conn.create_device(
-            project_id=project_id,
-            hostname=hostname,
-            plan=plan,
-            facility=facility,
-            operating_system=operating_system,
-            userdata=user_data,
-            locked=locked)
-        return device
-    except Exception as e:
-        module.fail_json(msg="failed to create device %s: %s" % 
-                         (hostname, str(e)))
-
+    device = packet_conn.create_device(
+        project_id=project_id,
+        hostname=hostname,
+        plan=plan,
+        facility=facility,
+        operating_system=operating_system,
+        userdata=user_data,
+        locked=locked)
+    return device
 
 def create_devices(module, packet_conn):
     """
@@ -401,33 +431,27 @@ def create_devices(module, packet_conn):
     created devices's hostname, id and ip addresses.
     """
     project_id = module.params.get('project_id')
-    hostname = module.params.get('hostname')
     logging.debug(module.params)
     logging.debug(module.params.get('count_offset'))
     #auto_increment = module.params.get('auto_increment')
     #wait = module.params.get('wait')
     #wait_timeout = module.params.get('wait_timeout')
+    hostname_list = _get_hostname_list(module)
 
-    #project = _find_project(packet_conn, project_id)
-    #if project is None:
-    #    module.fail_json(
-    #        msg='project_id %s not found.' % project_id)
-    if not isinstance(hostname, list):
-        hostnames = _expand_hostname_specification(module)
     existing_devices = packet_conn.list_devices(project_id,
-                                                params={'per_page': 100})
+        params={'per_page': MAX_DEVICES})
     existing_devices_names = [ed.hostname for ed in existing_devices]
     
-    to_be_created_hostnames = [hn for hn in hostnames if hn not in 
+    to_be_created_hostnames = [hn for hn in hostname_list if hn not in 
                                existing_devices_names]
-    # desired state: present
+
+    logging.debug(hostname_list)
+    logging.debug(to_be_created_hostnames)
+    for _hostname in to_be_created_hostnames:
+        if not _is_valid_hostname(_hostname):
+            raise Exception("Hostname \"%s\" does not seem to be valid" % _hostname)
     devices = [_create_device(module, packet_conn, project_id, n) for n in
                to_be_created_hostnames]
-
-    #if wait:
-    #    devices = packet_conn.list_devices(project_id, params={'per_page': 100})
-    #    _wait_for_device_creation(packet_conn, device, wait_timeout)
-    #    device = packet_conn.get_device(device.id)
 
     return {
         'changed': True if to_be_created_hostnames else False,
@@ -435,7 +459,7 @@ def create_devices(module, packet_conn):
     }
 
 
-def remove_device(module, packet_conn):
+def remove_devices(module, packet_conn):
     """
     Remove devices.
 
@@ -447,44 +471,32 @@ def remove_device(module, packet_conn):
     removed devices's hostname and id.
     """
     project_id = module.params.get('project_id')
-    #device_ids 
-    
-    device_ids = module.params.get('device_ids')
-    locked = module.params.get('locked')
 
-    if not isinstance(device_ids, list) or len(device_ids) < 1:
-        module.fail_json(
-            msg='device_ids should be a list of device ids or names.')
+    to_be_removed_devices = []
+    using_ids = True
+    if module.params.get('device_ids'):
+        device_id_list = _get_device_id_list(module)
+    elif module.params.get('hostnames'):
+        using_ids = False
+        hostname_list = _get_hostname_list(module)
 
-    #project = _find_project(packet_conn, project_id)
-    #if not project:
-    #    module.fail_json(
-    #        msg='project_id %s not found.' % project_id)
+    existing_devices = packet_conn.list_devices(project_id,
+                                         params={'per_page': MAX_DEVICES})
+    if using_ids:
+        to_be_removed_devices = [d for d in existing_devices
+                                 if d.id in device_id_list]
+    else:
+        to_be_removed_devices = [d for d in existing_devices
+                                 if d.hostname in hostname_list]
 
-    removed_devices = []
-    for device_id in device_ids:
-        device = _find_device(packet_conn, project_id, device_id)
-        if device is None:
-            continue
-
-        # If locked: no was passed and the device is locked, unlock it
-        if device.locked == True and locked == False:
-            device.locked = False
-            device.update()
-
-        try:
-            device.delete()
-            removed_devices.append(device)
-        except Exception as e:
-            module.fail_json(
-                msg="failed to terminate the machine: %s" % str(e))
+    delete_responses = [d.delete() for d in to_be_removed_devices]
 
     return {
-        'changed': True if removed_devices else False,
+        'changed': True if delete_responses else False,
         'devices': [{
             'id': device.id,
             'hostname': device.hostname,
-        } for device in removed_devices]
+        } for device in to_be_removed_devices]
     }
 
 
@@ -522,7 +534,7 @@ def startstop_device(module, packet_conn):
     for device_id in device_ids:
 
         # Resolve device
-        device = _find_device(packet_conn, project_id, device_id)
+        #device = _find_device(packet_conn, project_id, device_id)
         if device is None:
             continue
 
@@ -584,23 +596,27 @@ def startstop_device(module, packet_conn):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            project_id=dict(),
-            hostname=dict(),
+            project_id=dict(required=True),
+            hostnames=dict(type='list', aliases=['name']),
             operating_system=dict(),
             plan=dict(),
             count=dict(type='int', default=0),
             count_offset=dict(type='int', default=1),
             user_data=dict(default=None),
             #auto_increment=dict(type='bool', default=True),
-            #device_ids=dict(),
+            device_ids=dict(type='list'),
             features=dict(),
             locked=dict(type='bool', default=False),
             auth_token=dict(default=os.environ.get(PACKET_API_TOKEN_ENV_VAR)),
             facility=dict(default='ewr1'),
-            wait=dict(type='bool', default=True),
-            wait_timeout=dict(type='int', default=600),
             state=dict(default='present'),
-        )
+        ),
+        required_one_of=[('device_ids','hostnames',)],
+        mutually_exclusive=[
+            ('hostnames', 'device_ids'),
+            ('count', 'device_ids'),
+            ('count_offset', 'device_ids'),
+            ]
     )
 
     if not HAS_PACKET_SDK:
@@ -624,7 +640,7 @@ def main():
 
     if state == 'absent':
         try:
-            module.exit_json(**remove_device(module, packet_conn))
+            module.exit_json(**remove_devices(module, packet_conn))
         except Exception as e:
             module.fail_json(msg='failed to set machine state: %s' % str(e))
 
@@ -635,7 +651,7 @@ def main():
             module.fail_json(msg='failed to set machine state: %s' % str(e))
 
     elif state == 'present':
-        for param in ('hostname', 'operating_system', 'plan'):
+        for param in ('hostnames', 'operating_system', 'plan'):
             if not module.params.get(param):
                 module.fail_json(
                     msg="%s parameter is required for new instance." % param)
