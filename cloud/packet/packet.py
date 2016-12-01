@@ -429,7 +429,7 @@ def create_devices(module, packet_conn):
     created devices's hostname, id and ip addresses.
     """
     project_id = module.params.get('project_id')
-    wait_for_ips = module.params.get('wait_for_ips')
+    wait = module.params.get('wait')
     wait_timeout = module.params.get('wait_timeout')
     logging.debug(module.params)
     logging.debug(module.params.get('count_offset'))
@@ -447,22 +447,31 @@ def create_devices(module, packet_conn):
     created_devices = [_create_device(module, packet_conn, project_id, n)
                         for n in to_be_created_hostnames]
 
+
     def has_public_ip(addr_list):
-        return any([a['public'] and len(a['address'] > 0) for a in addr_list])
-    def all_have_public_ips(ds):
+        #logging.debug("has_pub_ip")
+        #logging.debug(str(addr_list))
+        return any([a['public'] and (len(a['address']) > 0) for a in addr_list])
+
+    def all_have_public_ip(ds):
+        #logging.debug("All_have_pu")
+        #logging.debug(str(ds))
         return all([has_public_ip(d.ip_addresses) for d in ds])
-                 
-    if wait_for_ips:
-        renewed_device_list = get_existing_devices(module, packet_conn)
+
+    def refresh_created_devices(ids_of_created_devices, module, packet_conn):
+        new_device_list = get_existing_devices(module, packet_conn)
+        return [d for d in new_device_list if d.id in ids_of_created_devices]
+
+    if wait:
+        created_ids = [d.id for d in created_devices]
         wait_timeout = time.time() + wait_timeout
         while wait_timeout > time.time():
-            refreshed_created_devices = [d for d in created_devices
-                if d.id in [rdl_dev.id for rdl_dev in renewed_device_list]]
-            if all_have_public_ips(refreshed_created_devices):
-                indeed_created_devices = refreshed_created_devices
+            refreshed = refresh_created_devices(created_ids, module,
+                                                packet_conn)
+            if all_have_public_ip(refreshed):
+                indeed_created_devices = refreshed
                 break
             time.sleep(5)
-            renewed_device_list = get_existing_devices(module, packet_conn)
     else:
         indeed_created_devices = created_devices
 
@@ -535,7 +544,7 @@ def main():
             auth_token=dict(default=os.environ.get(PACKET_API_TOKEN_ENV_VAR)),
             facility=dict(default='ewr1'),
             state=dict(default='present'),
-            wait_for_ips=dict(type='bool', default=False),
+            wait=dict(type='bool', default=False),
             wait_timeout=dict(type='int', default=60),
 
         ),
@@ -549,10 +558,6 @@ def main():
 
     if not HAS_PACKET_SDK:
         module.fail_json(msg='packet required for this module')
-
-    if not module.params.get('project_id'):
-        module.fail_json(
-            msg='project_id parameter is required.')
 
     if not module.params.get('auth_token'):
         _fail_msg = ( "if Packet API token is not in environment variable %s, "
@@ -576,7 +581,7 @@ def main():
         for param in ('hostnames', 'operating_system', 'plan'):
             if not module.params.get(param):
                 module.fail_json(
-                    msg="%s parameter is required for new instance." % param)
+                    msg="%s parameter is required for new device." % param)
         try:
             module.exit_json(**create_devices(module, packet_conn))
         except Exception as e:
