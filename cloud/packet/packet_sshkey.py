@@ -27,9 +27,7 @@ EXAMPLES = '''
 
 
 import os
-import time
 import uuid
-import re
 
 
 # debugging stuff, this should be at least commented in the PR
@@ -53,7 +51,10 @@ except ImportError:
 PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
 
 def _serialize_sshkey(sshkey):
-    pass
+    sshkey_data = {}
+    copy_keys = ['id', 'key', 'label','fingerprint']
+    for name in copy_keys:
+        sshkey_data[name] = getattr(sshkey, name)
     return sshkey_data
 
 
@@ -65,120 +66,102 @@ def _is_valid_uuid(myuuid):
     return str(val) == myuuid
 
 
-def create_devices(module, packet_conn):
-    """
-    Create new device
-
-    module : AnsibleModule object
-    packet_conn: authenticated packet object
-
-    """
-    project_id = module.params.get('project_id')
-    wait = module.params.get('wait')
-    wait_timeout = module.params.get('wait_timeout')
-    logging.debug(module.params)
-    logging.debug(module.params.get('count_offset'))
-    hostname_list = _get_hostname_list(module)
-
-    existing_devices =  get_existing_devices(module, packet_conn)
-    existing_devices_names = [ed.hostname for ed in existing_devices]
-    
-    to_be_created_hostnames = [hn for hn in hostname_list if hn not in 
-                               existing_devices_names]
-
-    logging.debug(hostname_list)
-    logging.debug(to_be_created_hostnames)
-
-    created_devices = [_create_device(module, packet_conn, project_id, n)
-                        for n in to_be_created_hostnames]
-
-
-    def has_public_ip(addr_list):
-        #logging.debug("has_pub_ip")
-        #logging.debug(str(addr_list))
-        return any([a['public'] and (len(a['address']) > 0) for a in addr_list])
-
-    def all_have_public_ip(ds):
-        #logging.debug("All_have_pu")
-        #logging.debug(str(ds))
-        return all([has_public_ip(d.ip_addresses) for d in ds])
-
-    def refresh_created_devices(ids_of_created_devices, module, packet_conn):
-        new_device_list = get_existing_devices(module, packet_conn)
-        return [d for d in new_device_list if d.id in ids_of_created_devices]
-
-    if wait:
-        created_ids = [d.id for d in created_devices]
-        wait_timeout = time.time() + wait_timeout
-        while wait_timeout > time.time():
-            refreshed = refresh_created_devices(created_ids, module,
-                                                packet_conn)
-            if all_have_public_ip(refreshed):
-                indeed_created_devices = refreshed
-                break
-            time.sleep(5)
-    else:
-        indeed_created_devices = created_devices
-
-    return {
-        'changed': True if to_be_created_hostnames else False,
-        'devices': [ _serialize_device(d) for d in indeed_created_devices],
-    }
-
-
 def get_existing_sshkeys(module, packet_conn): 
     return packet_conn.list_ssh_keys()
 
+def load_key_file(filename):
+    ret_dict = {}
+    key_file_str = open(filename).read().strip()
+    ret_dict['key'] = key_file_str
+    cut_key = key_file_str.strip().split()
+    if len(cut_key) in [2,3]:
+        if len(cut_key) == 3:
+            ret_dict['label'] = cut_key[2]
+    else:
+        raise Exception("Public key file %s is in wrong format" % filename)
+    return ret_dict
+    
 
 def get_sshkey_selector(module):
     selecting_fields = ['label', 'fingerprint', 'id', 'key']
-    select_dict = {f: module.params.get(f) if module.params.get(f)}
-    return lambda k: all([select_dict[f] == getattr(k,f)
-                          for f in select_dict.keys()])
+    key_id = module.params.get('id')
+    if key_id:
+        if not _is_valid_uuid(key_id):
+            raise Exception("sshkey ID %s is not valid UUID" % key_id)
 
-STATE_MAP = {
-    'present': 
-}
+    select_dict = {f: module.params.get(f) for f in selecting_fields 
+                   if module.params.get(f)}
+
+    if module.params.get('key_file'):
+        loaded_key = load_key_file(module.params.get('key_file'))
+        select_dict['key'] = loaded_key['key']
+        if module.params.get('label') is None:
+            if loaded_key.get('label'):
+                select_dict['label'] = loaded_key['label']
+
+    def selector(k):
+        if 'key' in select_dict:
+             return k.key == select_dict['key']
+        else:
+             return all([select_dict[f] == getattr(k,f) for f in select_dict])
+    return selector
 
 
 def act_on_sshkeys(target_state, module, packet_conn):
     selector = get_sshkey_selector(module)
     existing_sshkeys = get_existing_sshkeys(module, packet_conn)
-    sshkeys_to_process  = [k for k in existing_sshkeys if selector(k)]
+    matching_sshkeys = filter(selector, existing_sshkeys)
+    #[k for k in existing_sshkeys if selector(k)]
     if target_state == 'present':
-        if sshkeys_to_process == []:
+        if matching_sshkeys == []:
             # there is no key matching the fields from module call
-            sshkeys_to_process = []
+            # => create the key, label and
+            newkey = {}
+            if module.params.get('key_file'):
+                newkey = load_key_file(module.params.get('key_file'))
+            for param in ('label', 'key'):
+                if module.params.get(param):
+                    newkey[param] = module.params.get(param)
+            for param in ('label', 'key'):
+                if param not in newkey:
+                    _msg="you must supply either key_file OR (label AND key)"
+                    raise Exception(_msg)
+            matching_sshkeys = []
+            new_key_response = packet_conn.create_ssh_key(
+                                        newkey['label'], newkey['key'])
+                              
+            matching_sshkeys.append(new_key_response)
         else:
             # There's already a key matching the fields in the module call
             # => do nothing, and return {changed: False}
-            sshkeys_to_process = []
+            matching_sshkeys = []
     else:
-
-    for k in sshkeys_to_process:
-        api_operation = STATE_MAP[target_state]
-        try:
-            api_operation(d)
-        except Exception as e:
-            _msg = ("while trying to make device %s, id %s %s, from state %s, "
-                    "got error: %s" %
-                   (d.hostname, d.id, target_state, d.state, e.message))
-            raise Exception(_msg)
+        # state is 'absent' => delete mathcing keys
+        for k in matching_sshkeys:
+            try:
+                k.delete()
+            except Exception as e:
+                _msg = ("while trying to remove sshkey %s, id %s %s, "
+                        "got error: %s" %
+                       (k.label, k.id, target_state, e.message))
+                raise Exception(_msg)
 
     return {
-        'changed': True if sshkeys_to_process else False,
-        'sshkeys': [ _serialize_sshkey(d) for d in sshkeys_to_process ]
+        'changed': True if matching_sshkeys else False,
+        'sshkeys': [ _serialize_sshkey(k) for k in matching_sshkeys ]
     }
 
 
 def main():
     module = AnsibleModule(
         argument_spec=dict(
+            state = dict(choices=['present', 'absent'], default='present'),
             auth_token=dict(default=os.environ.get(PACKET_API_TOKEN_ENV_VAR)),
             label=dict(type='str', aliases=['name'], default=None),
             id=dict(type='str', default=None),
             fingerprint=dict(type='str', default=None),
             key=dict(type='str', default=None),
+            key_file=dict(type='path', default=None),
         ),
         required_one_of=[('label','id',)],
         mutually_exclusive=[
@@ -187,6 +170,7 @@ def main():
             ('id', 'fingerprint'),
             ('key', 'fingerprint'),
             ('key', 'id'),
+            ('key_file', 'key'),
             ]
     )
 
@@ -205,17 +189,17 @@ def main():
 
     state = module.params.get('state')
 
-    if state == 'present':
-        for param in ('label', 'key'):
-            if not module.params.get(param):
-                module.fail_json(
-                    msg="%s parameter is required for new sshkey." % param)
-    try:
-        module.exit_json(**act_on_sshkey(state, module, packet_conn))
-    except Exception as e:
-        module.fail_json(msg='failed to set sshkey state: %s' % str(e))
+    if state in ['present','absent']:
+        try:
+            module.exit_json(**act_on_sshkeys(state, module, packet_conn))
+        except Exception as e:
+            module.fail_json(msg='failed to set sshkey state: %s' % str(e))
+    else:
+        module.fail_json(msg='%s is not a valid state for this module' % state)
+
 
 from ansible.module_utils.basic import * # noqa: F403
+
 
 if __name__ == '__main__':
     main()

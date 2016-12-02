@@ -243,6 +243,15 @@ PACKET_DEVICE_STATES = (
 
 PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
 
+STATE_MAP = {
+    'absent': {k: lambda d: d.delete() for k in PACKET_DEVICE_STATES},
+    'active': {'inactive': lambda d: d.power_on()},
+    'inactive': {'active': lambda d: d.power_off()}
+    'rebooted': {'active': lambda d: d.reboot(),
+                 'inactive': lambda d: d.power_on()}
+    }
+
+ALLOWED_STATES = list(STATE_MAP.keys()) + ['present']
 
 def _serialize_device(device):
     """
@@ -441,6 +450,9 @@ def create_devices(module, packet_conn):
     to_be_created_hostnames = [hn for hn in hostname_list if hn not in 
                                existing_devices_names]
 
+    to_be_turned_on_devices = [d for d in existing_devies 
+                               if d.state == 'inactive']
+
     logging.debug(hostname_list)
     logging.debug(to_be_created_hostnames)
 
@@ -481,17 +493,6 @@ def create_devices(module, packet_conn):
     }
 
 
-
-DESIRED_STATE_MAP = {
-    'absent': {k: lambda d: d.delete() for k in PACKET_DEVICE_STATES},
-    'active': {'inactive': lambda d: d.power_on()},
-    'inactive': {'active': lambda d: d.power_off(),
-                 'nonexistent': _create_device},
-    'rebooted': {'active': lambda d: d.reboot(),
-                 'inactive': lambda d: d.power_on()}
-    }
-
-
 def get_device_selector(module):
     if module.params.get('device_ids'):
         device_id_list = _get_device_id_list(module)
@@ -511,9 +512,9 @@ def act_on_devices(target_state, module, packet_conn):
     selector = get_device_selector(module)
     existing_devices = get_existing_devices(module, packet_conn)
     devices_to_process  = [d for d in existing_devices if selector(d) and
-                           d.state in DESIRED_STATE_MAP[target_state]]
+                           d.state in STATE_MAP[target_state]]
     for d in devices_to_process:
-        api_operation = DESIRED_STATE_MAP[target_state][d.state]
+        api_operation = STATE_MAP[target_state][d.state]
         try:
             api_operation(d)
         except Exception as e:
@@ -543,7 +544,7 @@ def main():
             locked=dict(type='bool', default=False),
             auth_token=dict(default=os.environ.get(PACKET_API_TOKEN_ENV_VAR)),
             facility=dict(default='ewr1'),
-            state=dict(default='present'),
+            state=dict(choices=ALLOWED_STATES, default='present'),
             wait=dict(type='bool', default=False),
             wait_timeout=dict(type='int', default=60),
 
@@ -586,6 +587,9 @@ def main():
             module.exit_json(**create_devices(module, packet_conn))
         except Exception as e:
             module.fail_json(msg='failed when creating device(s): %s' % str(e))
+    else:
+        module.fail_json(msg='%s in not a valid state for this module' % state)
+
 
 from ansible.module_utils.basic import * # noqa: F403
 
