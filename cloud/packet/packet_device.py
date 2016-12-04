@@ -238,16 +238,8 @@ PACKET_DEVICE_STATES = (
 
 PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
 
-STATE_MAP = {
-    'absent': {s: packet.Device.delete for s in PACKET_DEVICE_STATES},
-    'active': {'inactive': packet.Device.power_on},
-    'inactive': {'active': packet.Device.power_off},
-    'rebooted': {'active': packet.Device.reboot,
-               'inactive': packet.Device.power_on},
-    }
 
-
-ALLOWED_STATES = list(STATE_MAP.keys()) + ['present']
+ALLOWED_STATES = ['absent', 'active', 'inactive', 'rebooted', 'present']
 
 
 def serialize_device(device):
@@ -475,10 +467,19 @@ def act_on_devices(target_state, module, packet_conn):
                            (d.hostname in specified_identifiers['hostnames'])]
 
     if target_state != 'present':
+
+        state_map = {
+            'absent': {s: packet.Device.delete for s in PACKET_DEVICE_STATES},
+            'active': {'inactive': packet.Device.power_on},
+            'inactive': {'active': packet.Device.power_off},
+            'rebooted': {'active': packet.Device.reboot,
+                       'inactive': packet.Device.power_on},
+            }
+
         # First do non-creation actions, it might be faster
         for d in process_devices:
-            if d.state in STATE_MAP[target_state]:
-                api_operation = STATE_MAP[target_state].get(d.state)
+            if d.state in state_map[target_state]:
+                api_operation = state_map[target_state].get(d.state)
                 try:
                     api_operation(d)
                     changed = True

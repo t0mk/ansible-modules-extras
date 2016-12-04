@@ -52,7 +52,7 @@ options:
 
 requirements:
   - "python >= 2.6"
-  - packet_python
+  - packet-python
 
 '''
 
