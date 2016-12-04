@@ -21,8 +21,8 @@ DOCUMENTATION = '''
 module: packet_sshkey
 short_description: Create/delete an SSH key in Packet host.
 description:
-     - Create/delete an SSH key
-     - API is documented at U(https://www.packet.net/help/api/#page:ssh-keys,header:ssh-keys-ssh-keys-post)
+     - Create/delete an SSH key in Packet host.
+     - API is documented at U(https://www.packet.net/help/api/#page:ssh-keys,header:ssh-keys-ssh-keys-post).
 version_added: "2.2"
 author: "Tomas Karasek <tom.to.the.k@gmail.com>"
 options:
@@ -199,7 +199,7 @@ def act_on_sshkeys(target_state, module, packet_conn):
                 raise Exception(_msg)
 
     return {
-        'changed': changed
+        'changed': changed,
         'sshkeys': [serialize_sshkey(k) for k in matching_sshkeys]
     }
 

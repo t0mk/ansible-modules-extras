@@ -25,8 +25,8 @@ module: packet_device
 short_description: create, destroy, start, stop, and reboot a Packet Host machine.
 
 description:
-    - create, destroy, update, start, stop, and reboot a Packet Host machine. When the machine is created it can optionally wait for it to have an IP address before returning. This module has a dependency on packet >= 1.0
-    - API is documented at U(https://www.packet.net/help/api/#page:devices,header:devices-devices-post)
+    - create, destroy, update, start, stop, and reboot a Packet Host machine. When the machine is created it can optionally wait for it to have an IP address before returning. This module has a dependency on packet >= 1.0.
+    - API is documented at U(https://www.packet.net/help/api/#page:devices,header:devices-devices-post).
 
 version_added: 2.2
 
@@ -219,7 +219,6 @@ try:
     import packet
 except ImportError:
     HAS_PACKET_SDK = False
-
 
 
 NAME_RE = '({0}|{0}{1}*{0})'.format('[a-zA-Z0-9]','[a-zA-Z0-9\-]')
@@ -419,63 +418,6 @@ def create_single_device(module, packet_conn, hostname):
     return device
 
 
-def create_devices(module, packet_conn):
-    """
-    Create new device
-
-    module : AnsibleModule object
-    packet_conn: authenticated packet object
-
-    Returns a dictionary containing a 'changed' attribute indicating whether
-    any device was added, and a 'devices' attribute with the list of the
-    created devices's hostname, id and ip addresses.
-    """
-    #project_id = module.params.get('project_id')
-    wait = module.params.get('wait')
-    wait_timeout = module.params.get('wait_timeout')
-    hostname_list = get_hostname_list(module)
-
-    existing_devices =  get_existing_devices(module, packet_conn)
-    existing_devices_names = [ed.hostname for ed in existing_devices]
-    
-    to_be_created_hostnames = [hn for hn in hostname_list if hn not in 
-                               existing_devices_names]
-
-    #to_be_turned_on_devices = [d for d in existing_devices 
-    #                           if d.state == 'inactive']
-
-    created_devices = [create_single_device(module, packet_conn, n)
-                        for n in to_be_created_hostnames]
-
-    def has_public_ip(addr_list):
-        return any([a['public'] and (len(a['address']) > 0) for a in addr_list])
-
-    def all_have_public_ip(ds):
-        return all([has_public_ip(d.ip_addresses) for d in ds])
-
-    def refresh_created_devices(ids_of_created_devices, module, packet_conn):
-        new_device_list = get_existing_devices(module, packet_conn)
-        return [d for d in new_device_list if d.id in ids_of_created_devices]
-
-    if wait:
-        created_ids = [d.id for d in created_devices]
-        wait_timeout = time.time() + wait_timeout
-        while wait_timeout > time.time():
-            refreshed = refresh_created_devices(created_ids, module,
-                                                packet_conn)
-            if all_have_public_ip(refreshed):
-                indeed_created_devices = refreshed
-                break
-            time.sleep(5)
-    else:
-        indeed_created_devices = created_devices
-
-    return {
-        'changed': True if to_be_created_hostnames else False,
-        'devices': [serialize_device(d) for d in indeed_created_devices],
-    }
-
-
 def wait_for_ips(module, packet_conn, created_devices):
 
     def has_public_ip(addr_list):
@@ -506,6 +448,7 @@ def wait_for_ips(module, packet_conn, created_devices):
 def get_existing_devices(module, packet_conn): 
     project_id = module.params.get('project_id')
     return packet_conn.list_devices(project_id, params={'per_page': MAX_DEVICES})
+
 
 def get_specified_device_identifiers(module):
     if module.params.get('device_ids'):
