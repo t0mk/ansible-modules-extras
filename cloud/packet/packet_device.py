@@ -28,7 +28,7 @@ description:
     - create, destroy, update, start, stop, and reboot a Packet Host machine. When the machine is created it can optionally wait for it to have an IP address before returning. This module has a dependency on packet >= 1.0.
     - API is documented at U(https://www.packet.net/help/api/#page:devices,header:devices-devices-post).
 
-version_added: 2.2
+version_added: 2.3
 
 author: Tomas Karasek <tom.to.the.k@gmail.com>, Matt Baldwin <baldwin@stackpointcloud.com>, Thibaud Morel l'Horset <teebes@gmail.com>
 

@@ -23,7 +23,7 @@ short_description: Create/delete an SSH key in Packet host.
 description:
      - Create/delete an SSH key in Packet host.
      - API is documented at U(https://www.packet.net/help/api/#page:ssh-keys,header:ssh-keys-ssh-keys-post).
-version_added: "2.2"
+version_added: "2.3"
 author: "Tomas Karasek <tom.to.the.k@gmail.com>"
 options:
   state:
