@@ -1,4 +1,8 @@
 #!/usr/bin/python
+# (c) 2016, Tomas Karasek <tom.to.the.k@gmail.com>
+# (c) 2016, Matt Baldwin <baldwin@stackpointcloud.com>
+# (c) 2016, Thibaud Morel l'Horset <teebes@gmail.com>
+#
 # This file is part of Ansible
 #
 # Ansible is free software: you can redistribute it and/or modify
@@ -16,176 +20,177 @@
 
 DOCUMENTATION = '''
 ---
-module: packet
+module: packet_device
+
 short_description: create, destroy, start, stop, and reboot a Packet Host machine.
+
 description:
-     - create, destroy, update, start, stop, and reboot a Packet Host machine. When the machine is created it can optionally wait for it to be 'running' before returning. This module has a dependency on packet >= 1.0
-version_added: "2.1"
+    - create, destroy, update, start, stop, and reboot a Packet Host machine. When the machine is created it can optionally wait for it to have an IP address before returning. This module has a dependency on packet >= 1.0
+    - API is documented at U(https://www.packet.net/help/api/#page:devices,header:devices-devices-post)
+
+version_added: 2.2
+
+author: Tomas Karasek <tom.to.the.k@gmail.com>, Matt Baldwin <baldwin@stackpointcloud.com>, Thibaud Morel l'Horset <teebes@gmail.com>
+
 options:
-  state:
-    description:
-      - Define a device's state to create, remove, start or stop it.
-    required: false
-    default: 'present'
-    choices: [ "present", "absent", "running", "stopped" ]
-  project_id:
-    description:
-      - Your Packet Project ID.
-    required: true
   auth_token:
     description:
-      - Authenticating API token provided by Packet.
-    required: true
-  hostnames:
-    description:
-      - The hostname or ID of the device. Only used when state is 'present'.
-    required: true when state is 'present', false otherwise.
-  operating_system:
-    description:
-      - The system operating_system name for creating the machine, e.g. coreos_stable.
-    required: true for 'present' state, false otherwise
-  plan:
-    description:
-      - Plan to use for this device.
-    required: true for 'present' state, false otherwise
-    choices: [ "baremetal_0", "baremetal_1", "baremetal_3" ]
-  facility:
-    description:
-      - The datacenter location.
-    required: false
-    default: ewr1
-    choices: [ "ewr1" ]
-  device_ids:
-    description:
-      - list of device ids or host names, used when state is 'running', 'stopped' or 'absent'.
-    required: false for 'running' state, true otherwise
+      - Packet api token. You can also supply it in env var PACKET_API_TOKEN.
+
   count:
     description:
-      - The number of machines to create.
-    required: false
-    default: 1
-  locked:
+      - The number of devices to create. Count number can he included in hostname via the %d string formatter.
+
+  count_offset:
     description:
-      - Whether to lock the device. If not specified, the lock state will not be changed.
-    required: false
-    default: null
-    choices: [ "yes", "no", null ]
+      - From which number to start the count. 
+
+  device_ids:
+    description:
+      - List of device IDs on which to operate.
+
+  facility:
+    description:
+      - Facility slug for device creation. As of 2016, it should be one of [ewr1, sjc1. ams1].
+
+  features:
+    description:
+      - Dict with "features" for device creation. See Packet API docs for details.
+
+  hostnames:
+    description:
+      - Alias of I(name)
+      - A hostname of a device, or a list of hostnames. 
+      - If given string or one-item list, you can use the C("%d") Python string format to expand numbers from count.
+      - If only one hostname, it might be expanded to list if count>1. 
+    aliases: [name]
+
+  lock:
+    description:
+      - Whether to lock a created device.
+    type: bool
+    default: false
+
+  operating_system:
+    description:
+      - OS slug for device creation. See Packet docs or API for current list.
+
+  plan:
+    description:
+      - Plan slug for device creation. See Packet docs or API for current list.
+
+  project_id:
+    description:
+      - ID of project of the device.
+    required: true
+
+  state:
+    description:
+      - Desired state of the device.
+    choices: [present, absent, active, inactive, rebooted]
+    default: 'present'
+
   user_data:
     description:
-      - opaque blob of data which is made available to the machine
+      - Userdata blob made available to the machine
     required: false
     default: None
+
   wait:
     description:
-      - wait for the instance to be in state 'running' before returning
+      - Whether to wait for the instance to be assigned IP address before returning.
     required: false
-    default: "yes"
-    choices: [ "yes", "no" ]
+    default: False
+    type: bool
+
   wait_timeout:
     description:
-      - how long before wait gives up, in seconds
-    default: 600
-  auto_increment:
-    description:
-      - When creating multiple devices at once, whether to differentiate hostnames by appending a count after them or substituting the count where there is a %02d or %03d in the hostname string.
-    default: yes
-    choices: ["yes", "no"]
+      - How long to wait for IP address of new devices before quitting. In seconds.
+    default: 60
 
 requirements:
-     - "packet"
+     - packet-python
      - "python >= 2.6"
-author: Matt Baldwin (baldwin@stackpointcloud.com)
 '''
 
 EXAMPLES = '''
+# All the examples assume that you have your Packet api token in env var PACKET_API_TOKEN.
+# You can also pass it to the auth_token parameter of the module instead.
 
-# Provisioning example. This will create three servers and enumerate their names.
+# Creating devices
 
-- packet:
-    project_id: StackPointCloud
-    auth_token: packet_private_api_key
-    name: node%02d.stackpointcloud.com
-    plan: baremetal_1
-    facility: ewr1
-    operating_system: coreos_stable
-    count: 3
+- name: create 1 device
+  hosts: localhost
+  tasks:
+  - packet_device:
+      project_id: 89b497ee-5afc-420a-8fb5-56984898f4df
+      hostnames: myserver
+      operating_system: ubuntu_16_04
+      plan: baremetal_0
+      facility: sjc1
 
-# Create three machines, passing in user_data.
+- name: create 3 ubuntu devices called server-01, server-02 and server-03  
+  hosts: localhost
+  tasks:
+  - packet_device:
+      project_id: 89b497ee-5afc-420a-8fb5-56984898f4df
+      hostnames: server-%02d
+      count: 3
+      operating_system: ubuntu_16_04
+      plan: baremetal_0
+      facility: sjc1
 
-- packet:
-    project_id: StackPointCloud
-    auth_token: packet_private_api_key
-    name: node%02d.stackpointcloud.com
-    plan: baremetal_1
-    facility: ewr1
-    operating_system: coreos_stable
-    count: 3
-    wait: yes
-    wait_timeout: 600
-    user_data: |
-      #cloud-config
-      ssh_authorized_keys:
-        - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC0g+ZTxC7weoIJLUafOgrm+h..."
+- name: Create 3 coreos devices with userdata, wait till they get IPs and then wait for SSH
+  hosts: localhost
+  tasks:
+  - name: create 3 devices and register their facts
+    packet_device:
+      hostnames: [coreos-one, coreos-two, coreos-three]
+      operating_system: coreos_stable
+      plan: baremetal_0
+      facility: ewr1
+      locked: true
+      project_id: 89b497ee-5afc-420a-8fb5-56984898f4df
+      user_data: |
+        #cloud-config
+        ssh_authorized_keys:
+          - ssh-dss AAAAB3NzaC1kc3MAAACBAIfNT5S0ncP4BBJBYNhNPxFF9lqVhfPeu6SM1LoCocxqDc1AT3zFRi8hjIf6TLZ2AA4FYbcAWxLMhiBxZRVldT9GdBXile78kAK5z3bKTwq152DCqpxwwbaTIggLFhsU8wrfBsPWnDuAxZ0h7mmrCjoLIE3CNLDA/NmV3iB8xMThAAAAFQCStcesSgR1adPORzBxTr7hug92LwAAAIBOProm3Gk+HWedLyE8IfofLaOeRnbBRHAOL4z0SexKkVOnQ/LGN/uDIIPGGBDYTvXgKZT+jbHeulRJ2jKgfSpGKN4JxFQ8uzVH492jEiiUJtT72Ss1dCV4PmyERVIw+f54itihV3z/t25dWgowhb0int8iC/OY3cGodlmYb3wdcQAAAIBuLbB45djZXzUkOTzzcRDIRfhaxo5WipbtEM2B1fuBt2gyrvksPpH/LK6xTjdIIb0CxPu4OCxwJG0aOz5kJoRnOWIXQGhH7VowrJhsqhIc8gN9ErbO5ea8b1L76MNcAotmBDeTUiPw01IJ8MdDxfmcsCslJKgoRKSmQpCwXQtN2g== tomk@hp2
+        coreos:
+          etcd:
+            discovery: https://discovery.etcd.io/6a28e078895c5ec737174db2419bb2f3
+            addr: $private_ipv4:4001
+            peer-addr: $private_ipv4:7001
+          fleet:
+            public-ip: $private_ipv4
+          units:
+            - name: etcd.service
+              command: start
+            - name: fleet.service
+              command: start
+    register: newhosts
 
-      coreos:
-        etcd:
-          # generate a new token for each unique cluster from https://discovery.etcd.io/new
-          discovery: https://discovery.etcd.io/{{ discovery_token }}
-          # use $public_ipv4 if your datacenter of choice does not support private networking
-          addr: $private_ipv4:4001
-          peer-addr: $private_ipv4:7001
-        fleet:
-          public-ip: $private_ipv4   # used for fleetctl ssh command
-        units:
-          - name: etcd.service
-            command: start
-          - name: fleet.service
-            command: start
+  - name: wait for ssh
+    wait_for:
+      delay: 1
+      host: "{{ item.public_ipv4 }}"
+      port: 22
+      state: started
+      timeout: 500
+    with_items: "{{ newhosts.devices }}"
 
-# Removing machines
 
-- packet:
-    project_id: StackPointCloud
-    auth_token: packet_private_api_key
-    state: absent
-    device_ids:
-      - 'node01.stackpointcloud.com'
-      - 'node02.stackpointcloud.com'
-      - 'node03.stackpointcloud.com'
+# Other states of devices
 
-# Starting Machines.
-
-- packet:
-    project_id: StackPointCloud
-    auth_token: packet_private_api_key
-    state: running
-    device_ids:
-      - 'node01.stackpointcloud.com'
-      - 'node02.stackpointcloud.com'
-      - 'node03.stackpointcloud.com'
-
-# Stopping Machines
-
-- packet:
-    project_id: StackPointCloud
-    auth_token: packet_private_api_key
-    state: stopped
-    device_ids:
-      - 'node01.stackpointcloud.com'
-      - 'node02.stackpointcloud.com'
-      - 'node03.stackpointcloud.com'
-
-# Lock a pachine
-- packet:
-    project_id: StackPointCloud
-    auth_token: packet_private_api_key
-    state: running
-    locked: yes
-    device_ids:
-      - 'node01.stackpointcloud.com'
-      - 'node02.stackpointcloud.com'
-      - 'node03.stackpointcloud.com'
-
+- name: remove 3 devices by uuid
+  hosts: localhost
+  tasks:
+  - packet_device:
+      project_id: 89b497ee-5afc-420a-8fb5-56984898f4df
+      state: absent
+      device_ids:
+        - 1fb4faf8-a638-4ac7-8f47-86fe514c30d8
+        - 2eb4faf8-a638-4ac7-8f47-86fe514c3043
+        - 6bb4faf8-a638-4ac7-8f47-86fe514c301f
 '''
 
 RETURN = '''
@@ -197,7 +202,7 @@ changed:
 devices:
     description: Information about each device that was processed
     type: array
-    sample: '[{"hostname": "my-server.com", "id": "server-id"}]'
+    sample: '[{"hostname": "my-server.com", "id": "server-id", "public-ipv4": "147.229.15.12", "private-ipv4": "10.0.15.12", "public-ipv6": ""2604:1380:2:5200::3"}]'
     returned: always
 '''
 
@@ -208,14 +213,7 @@ import uuid
 import re
 
 
-# debugging stuff, this should be at least commented in the PR
-import logging
-logging.basicConfig(filename='/tmp/plog',level=logging.DEBUG,
-    format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
-
-
 HAS_PACKET_SDK = True
-
 
 try:
     import packet
@@ -223,11 +221,9 @@ except ImportError:
     HAS_PACKET_SDK = False
 
 
-# API is documented at
-# https://www.packet.net/help/api/#page:devices,header:devices-devices-post
 
-_NAME_RE = '({0}|{0}{1}*{0})'.format('[a-zA-Z0-9]','[a-zA-Z0-9\-]')
-HOSTNAME_RE = '({0}\.)*{0}$'.format(_NAME_RE)
+NAME_RE = '({0}|{0}{1}*{0})'.format('[a-zA-Z0-9]','[a-zA-Z0-9\-]')
+HOSTNAME_RE = '({0}\.)*{0}$'.format(NAME_RE)
 MAX_DEVICES = 100
 
 PACKET_DEVICE_STATES = (
@@ -244,16 +240,18 @@ PACKET_DEVICE_STATES = (
 PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
 
 STATE_MAP = {
-    'absent': {k: lambda d: d.delete() for k in PACKET_DEVICE_STATES},
-    'active': {'inactive': lambda d: d.power_on()},
-    'inactive': {'active': lambda d: d.power_off()}
-    'rebooted': {'active': lambda d: d.reboot(),
-                 'inactive': lambda d: d.power_on()}
+    'absent': {s: packet.Device.delete for s in PACKET_DEVICE_STATES},
+    'active': {'inactive': packet.Device.power_on},
+    'inactive': {'active': packet.Device.power_off},
+    'rebooted': {'active': packet.Device.reboot,
+               'inactive': packet.Device.power_on},
     }
+
 
 ALLOWED_STATES = list(STATE_MAP.keys()) + ['present']
 
-def _serialize_device(device):
+
+def serialize_device(device):
     """
     Standard represenation for a device as returned by various tasks::
 
@@ -320,11 +318,11 @@ def _serialize_device(device):
     return device_data
 
 
-def _is_valid_hostname(hostname):
+def is_valid_hostname(hostname):
     return re.match(HOSTNAME_RE, hostname) is not None
 
 
-def _is_valid_uuid(myuuid):
+def is_valid_uuid(myuuid):
     try:
         val = uuid.UUID(myuuid, version=4)
     except ValueError:
@@ -332,21 +330,14 @@ def _is_valid_uuid(myuuid):
     return str(val) == myuuid
 
 
-def _listify_string_name_or_id(s):
+def listify_string_name_or_id(s):
     if ',' is s:
         return [i.strip() for i in s.split(',')]
     else:
         return [s.strip()]
 
 
-def _has_int_formatter(s):
-    if re.search("%\d{0,2}d", s):
-        return True
-    else:
-        return False
-
-
-def _get_hostname_list(module):
+def get_hostname_list(module):
     # hostname is a list-typed param, so I guess it should return list
     # (and it does, in Ansbile 2.2.1) but in order to be defensive,
     # I keep here the code to convert an eventual string to list
@@ -354,7 +345,7 @@ def _get_hostname_list(module):
     count = module.params.get('count')
     count_offset = module.params.get('count_offset')
     if isinstance(hostnames, str):
-        hostnames = _listify_string_name_or_id(hostnames)
+        hostnames = listify_string_name_or_id(hostnames)
     if not isinstance(hostnames, list):
         raise Exception("name %s is not convertible to list" % hostnames)
 
@@ -369,17 +360,14 @@ def _get_hostname_list(module):
     if (len(hostnames) == 1) and (count > 0):
         hostname_spec = hostnames[0]
         count_range = range(count_offset, count_offset + count)
-        if _has_int_formatter(hostname_spec):
+        if re.search("%\d{0,2}d", hostname_spec):
             hostnames = [hostname_spec % i for i in count_range]
         elif count > 1:
             hostname_spec = '%s%%02d' % hostname_spec
             hostnames = [hostname_spec % i for i in count_range]
 
-    logging.debug(hostnames)
-    logging.debug(type(hostnames))
-
     for hn in hostnames:
-        if not _is_valid_hostname(hn):
+        if not is_valid_hostname(hn):
             raise Exception("Hostname '%s' does not seem to be valid" % hn)
 
     if len(hostnames) > MAX_DEVICES:
@@ -388,18 +376,16 @@ def _get_hostname_list(module):
     return hostnames
 
 
-def _get_device_id_list(module):
+def get_device_id_list(module):
     device_ids = module.params.get('device_ids')
 
     if isinstance(device_ids, str):
-        device_ids = _listify_string_name_or_id(device_ids)
+        device_ids = listify_string_name_or_id(device_ids)
 
     device_ids = [di.strip() for di in device_ids]
 
-    logging.debug(device_ids)
-    # trtying to be ultra user-friednly 
     for di in device_ids:
-        if not _is_valid_uuid(di):
+        if not is_valid_uuid(di):
             raise Exception("Device ID '%s' does not seem to be valid" % di)
 
     if len(device_ids) > MAX_DEVICES:
@@ -408,10 +394,17 @@ def _get_device_id_list(module):
     return device_ids
      
 
-def _create_device(module, packet_conn, project_id, hostname):
+def create_single_device(module, packet_conn, hostname):
+
+    for param in ('hostnames', 'operating_system', 'plan'):
+        if not module.params.get(param):
+            raise Exception("%s parameter is required for new device."
+                             % param)
+    project_id = module.params.get('project_id')
     plan = module.params.get('plan')
     user_data = module.params.get('user_data')
     facility = module.params.get('facility')
+    locked = module.params.get('lock')
     operating_system = module.params.get('operating_system')
     locked = module.params.get('locked')
 
@@ -437,12 +430,10 @@ def create_devices(module, packet_conn):
     any device was added, and a 'devices' attribute with the list of the
     created devices's hostname, id and ip addresses.
     """
-    project_id = module.params.get('project_id')
+    #project_id = module.params.get('project_id')
     wait = module.params.get('wait')
     wait_timeout = module.params.get('wait_timeout')
-    logging.debug(module.params)
-    logging.debug(module.params.get('count_offset'))
-    hostname_list = _get_hostname_list(module)
+    hostname_list = get_hostname_list(module)
 
     existing_devices =  get_existing_devices(module, packet_conn)
     existing_devices_names = [ed.hostname for ed in existing_devices]
@@ -450,24 +441,16 @@ def create_devices(module, packet_conn):
     to_be_created_hostnames = [hn for hn in hostname_list if hn not in 
                                existing_devices_names]
 
-    to_be_turned_on_devices = [d for d in existing_devies 
-                               if d.state == 'inactive']
+    #to_be_turned_on_devices = [d for d in existing_devices 
+    #                           if d.state == 'inactive']
 
-    logging.debug(hostname_list)
-    logging.debug(to_be_created_hostnames)
-
-    created_devices = [_create_device(module, packet_conn, project_id, n)
+    created_devices = [create_single_device(module, packet_conn, n)
                         for n in to_be_created_hostnames]
 
-
     def has_public_ip(addr_list):
-        #logging.debug("has_pub_ip")
-        #logging.debug(str(addr_list))
         return any([a['public'] and (len(a['address']) > 0) for a in addr_list])
 
     def all_have_public_ip(ds):
-        #logging.debug("All_have_pu")
-        #logging.debug(str(ds))
         return all([has_public_ip(d.ip_addresses) for d in ds])
 
     def refresh_created_devices(ids_of_created_devices, module, packet_conn):
@@ -489,62 +472,116 @@ def create_devices(module, packet_conn):
 
     return {
         'changed': True if to_be_created_hostnames else False,
-        'devices': [ _serialize_device(d) for d in indeed_created_devices],
+        'devices': [serialize_device(d) for d in indeed_created_devices],
     }
 
 
-def get_device_selector(module):
-    if module.params.get('device_ids'):
-        device_id_list = _get_device_id_list(module)
-        return lambda d: d.id in device_id_list
-    elif module.params.get('hostnames'):
-        hostname_list = _get_hostname_list(module)
-        return lambda d: d.hostname in hostname_list
+def wait_for_ips(module, packet_conn, created_devices):
+
+    def has_public_ip(addr_list):
+        return any([a['public'] and (len(a['address']) > 0) for a in addr_list])
+
+    def all_have_public_ip(ds):
+        return all([has_public_ip(d.ip_addresses) for d in ds])
+
+    def refresh_created_devices(ids_of_created_devices, module, packet_conn):
+        new_device_list = get_existing_devices(module, packet_conn)
+        return [d for d in new_device_list if d.id in ids_of_created_devices]
+
+    created_ids = [d.id for d in created_devices]
+    wait_timeout = module.params.get('wait_timeout')
+    wait_timeout = time.time() + wait_timeout
+    while wait_timeout > time.time():
+        refreshed = refresh_created_devices(created_ids, module,
+                                            packet_conn)
+        if all_have_public_ip(refreshed):
+            return refreshed
+            break
+        time.sleep(5)
+    
+    raise Exception("Waiting for IP assignment timed out. Hostnames: %s"
+                     % [d.hostname for d in created_devices])
 
 
 def get_existing_devices(module, packet_conn): 
     project_id = module.params.get('project_id')
-    return packet_conn.list_devices(project_id,
-                                         params={'per_page': MAX_DEVICES})
+    return packet_conn.list_devices(project_id, params={'per_page': MAX_DEVICES})
+
+def get_specified_device_identifiers(module):
+    if module.params.get('device_ids'):
+        device_id_list = get_device_id_list(module)
+        return {'ids': device_id_list, 'hostnames': []}
+    elif module.params.get('hostnames'):
+        hostname_list = get_hostname_list(module)
+        return {'hostnames': hostname_list, 'ids': []}
 
 
 def act_on_devices(target_state, module, packet_conn):
-    selector = get_device_selector(module)
+    specified_identifiers = get_specified_device_identifiers(module)
     existing_devices = get_existing_devices(module, packet_conn)
-    devices_to_process  = [d for d in existing_devices if selector(d) and
-                           d.state in STATE_MAP[target_state]]
-    for d in devices_to_process:
-        api_operation = STATE_MAP[target_state][d.state]
-        try:
-            api_operation(d)
-        except Exception as e:
-            _msg = ("while trying to make device %s, id %s %s, from state %s, "
-                    "got error: %s" %
-                   (d.hostname, d.id, target_state, d.state, e.message))
-            raise Exception(_msg)
+    changed = False
+    create_hostnames = []
+    if target_state in ['present', 'active', 'rebooted']:
+        # states where we might create non-existing specified devices
+        existing_devices_names = [ed.hostname for ed in existing_devices]
+        create_hostnames = [hn for hn in specified_identifiers['hostnames']
+                            if hn not in existing_devices_names]
+
+    process_devices  = [d for d in existing_devices
+                        if (d.id in specified_identifiers['ids']) or
+                           (d.hostname in specified_identifiers['hostnames'])]
+
+    if target_state != 'present':
+        # First do non-creation actions, it might be faster
+        for d in process_devices:
+            if d.state in STATE_MAP[target_state]:
+                api_operation = STATE_MAP[target_state].get(d.state)
+                try:
+                    api_operation(d)
+                    changed = True
+                except Exception as e:
+                    _msg = ("while trying to make device %s, id %s %s, from state %s, "
+                            "with api call by %s got error: %s" %
+                           (d.hostname, d.id, target_state, d.state, api_operation, e.message))
+                    raise Exception(_msg)
+            else:
+                _msg = ("I don't know how to process existing device %s from state %s "
+                        "to state %s" % (d.hostname, d.state, target_state))
+                raise Exception(_msg)
+
+    # At last create missing devices
+    created_devices = []
+    if create_hostnames:
+        created_devices = [create_single_device(module, packet_conn, n)
+                           for n in create_hostnames]
+        if module.params.get('wait'):
+             created_devices = wait_for_ips(module, packet_conn, created_devices)
+        changed = True
+
+    processed_devices = created_devices + process_devices
 
     return {
-        'changed': True if devices_to_process else False,
-        'devices': [ _serialize_device(d) for d in devices_to_process ]
+        'changed': changed,
+        'devices': [serialize_device(d) for d in processed_devices]
     }
 
 
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            project_id=dict(required=True),
-            hostnames=dict(type='list', aliases=['name']),
-            operating_system=dict(),
-            plan=dict(),
+            auth_token=dict(default=os.environ.get(PACKET_API_TOKEN_ENV_VAR)),
             count=dict(type='int', default=1),
             count_offset=dict(type='int', default=1),
-            user_data=dict(default=None),
             device_ids=dict(type='list'),
-            features=dict(),
-            locked=dict(type='bool', default=False),
-            auth_token=dict(default=os.environ.get(PACKET_API_TOKEN_ENV_VAR)),
             facility=dict(default='ewr1'),
+            features=dict(type='dict'),
+            hostnames=dict(type='list', aliases=['name']),
+            locked=dict(type='bool', default=False),
+            operating_system=dict(),
+            plan=dict(),
+            project_id=dict(required=True),
             state=dict(choices=ALLOWED_STATES, default='present'),
+            user_data=dict(default=None),
             wait=dict(type='bool', default=False),
             wait_timeout=dict(type='int', default=60),
 
@@ -572,23 +609,10 @@ def main():
 
     state = module.params.get('state')
 
-    if state in ('running', 'stopped', 'rebooted','absent'):
-        try:
-            module.exit_json(**act_on_devices(state, module, packet_conn))
-        except Exception as e:
-            module.fail_json(msg='failed to set machine state: %s' % str(e))
-
-    elif state == 'present':
-        for param in ('hostnames', 'operating_system', 'plan'):
-            if not module.params.get(param):
-                module.fail_json(
-                    msg="%s parameter is required for new device." % param)
-        try:
-            module.exit_json(**create_devices(module, packet_conn))
-        except Exception as e:
-            module.fail_json(msg='failed when creating device(s): %s' % str(e))
-    else:
-        module.fail_json(msg='%s in not a valid state for this module' % state)
+    try:
+        module.exit_json(**act_on_devices(state, module, packet_conn))
+    except Exception as e:
+        module.fail_json(msg='failed to set machine state %s, error: %s' % (state,str(e)))
 
 
 from ansible.module_utils.basic import * # noqa: F403

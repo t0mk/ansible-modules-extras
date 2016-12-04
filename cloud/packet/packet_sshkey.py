@@ -19,10 +19,11 @@
 DOCUMENTATION = '''
 ---
 module: packet_sshkey
-short_description: Create/delete an SSH key in Packet host
+short_description: Create/delete an SSH key in Packet host.
 description:
-     - Create/delete an SSH key.
-version_added: "2.2.1"
+     - Create/delete an SSH key
+     - API is documented at U(https://www.packet.net/help/api/#page:ssh-keys,header:ssh-keys-ssh-keys-post)
+version_added: "2.2"
 author: "Tomas Karasek <tom.to.the.k@gmail.com>"
 options:
   state:
@@ -56,6 +57,9 @@ requirements:
 '''
 
 EXAMPLES = '''
+# All the examples assume that you have your Packet API token in env var PACKET_API_TOKEN.
+# You can also pass the api token in module param auth_token.
+
 - name: create sshkey from string
   hosts: localhost
   tasks:
@@ -91,14 +95,12 @@ except ImportError:
     HAS_PACKET_SDK = False
 
 
-# API is documented at
-# https://www.packet.net/help/api/#page:ssh-keys,header:ssh-keys-ssh-keys-post
 
 
 PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
 
 
-def _serialize_sshkey(sshkey):
+def serialize_sshkey(sshkey):
     sshkey_data = {}
     copy_keys = ['id', 'key', 'label','fingerprint']
     for name in copy_keys:
@@ -106,7 +108,7 @@ def _serialize_sshkey(sshkey):
     return sshkey_data
 
 
-def _is_valid_uuid(myuuid):
+def is_valid_uuid(myuuid):
     try:
         val = uuid.UUID(myuuid, version=4)
     except ValueError:
@@ -130,7 +132,7 @@ def load_key_string(key_str):
 def get_sshkey_selector(module):
     key_id = module.params.get('id')
     if key_id:
-        if not _is_valid_uuid(key_id):
+        if not is_valid_uuid(key_id):
             raise Exception("sshkey ID %s is not valid UUID" % key_id)
     selecting_fields = ['label', 'fingerprint', 'id', 'key']
     select_dict = {f: module.params.get(f) for f in selecting_fields if
@@ -158,6 +160,7 @@ def act_on_sshkeys(target_state, module, packet_conn):
     selector = get_sshkey_selector(module)
     existing_sshkeys = packet_conn.list_ssh_keys()
     matching_sshkeys = filter(selector, existing_sshkeys)
+    changed = False
     if target_state == 'present':
         if matching_sshkeys == []:
             # there is no key matching the fields from module call
@@ -180,17 +183,15 @@ def act_on_sshkeys(target_state, module, packet_conn):
             matching_sshkeys = []
             new_key_response = packet_conn.create_ssh_key(
                                         newkey['label'], newkey['key'])
+            changed = True
                               
             matching_sshkeys.append(new_key_response)
-        else:
-            # There's already a key matching the fields in the module call
-            # => do nothing, and return {changed: False}
-            matching_sshkeys = []
-    elif target_state == 'absent':
+    else:
         # state is 'absent' => delete mathcing keys
         for k in matching_sshkeys:
             try:
                 k.delete()
+                changed = True
             except Exception as e:
                 _msg = ("while trying to remove sshkey %s, id %s %s, "
                         "got error: %s" %
@@ -198,8 +199,8 @@ def act_on_sshkeys(target_state, module, packet_conn):
                 raise Exception(_msg)
 
     return {
-        'changed': True if matching_sshkeys else False,
-        'sshkeys': [ _serialize_sshkey(k) for k in matching_sshkeys ]
+        'changed': changed
+        'sshkeys': [serialize_sshkey(k) for k in matching_sshkeys]
     }
 
 
