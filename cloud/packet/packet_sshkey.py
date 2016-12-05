@@ -135,12 +135,14 @@ def get_sshkey_selector(module):
         if not is_valid_uuid(key_id):
             raise Exception("sshkey ID %s is not valid UUID" % key_id)
     selecting_fields = ['label', 'fingerprint', 'id', 'key']
-    select_dict = {f: module.params.get(f) for f in selecting_fields if
-                      module.params.get(f) is not None}
+    select_dict = {}
+    for f in selecting_fields:
+        if module.params.get(f) is not None:
+            select_dict[f] = module.params.get(f)
 
     if module.params.get('key_file'):
-        with open(module.params.get('key_file')) as f:
-            loaded_key = load_key_string(f.read())
+        with open(module.params.get('key_file')) as _file:
+            loaded_key = load_key_string(_file.read())
         select_dict['key'] = loaded_key['key']
         if module.params.get('label') is None:
             if loaded_key.get('label'):

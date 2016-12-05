@@ -467,9 +467,12 @@ def act_on_devices(target_state, module, packet_conn):
                            (d.hostname in specified_identifiers['hostnames'])]
 
     if target_state != 'present':
+        _absent_state_map = {}
+        for s in PACKET_DEVICE_STATES:
+            _absent_state_map[s] = packet.Device.delete
 
         state_map = {
-            'absent': {s: packet.Device.delete for s in PACKET_DEVICE_STATES},
+            'absent': _absent_state_map,
             'active': {'inactive': packet.Device.power_on},
             'inactive': {'active': packet.Device.power_off},
             'rebooted': {'active': packet.Device.reboot,
