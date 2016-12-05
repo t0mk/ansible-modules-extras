@@ -81,6 +81,25 @@ EXAMPLES = '''
       id: eef49903-7a09-4ca1-af67-4087c29ab5b6
 '''
 
+RETURN = '''
+changed:
+    description: True if a sshkey was created or removed.
+    type: bool
+    sample: True
+    returned: always
+sshkeys:
+    description: Information about sshkeys that were createe/removed.
+    type: array
+    sample: [
+        {
+            "fingerprint": "5c:93:74:7c:ed:07:17:62:28:75:79:23:d6:08:93:46", 
+            "id": "41d61bd8-3342-428b-a09c-e67bdd18a9b7", 
+            "key": "ssh-dss AAAAB3NzaC1kc3MAAACBAIfNT5S0ncP4BBJBYNhNPxFF9lqVhfPeu6SM1LoCocxqDc1AT3zFRi8hjIf6TLZ2AA4FYbcAWxLMhiBxZRVldT9GdBXile78kAK5z3bKTwq152DCqpxwwbaTIggLFhsU8wrfBsPWnDuAxZ0h7mmrCjoLIE3CNLDA/NmV3iB8xMThAAAAFQCStcesSgR1adPORzBxTr7hug92LwAAAIBOProm3Gk+HWedLyE8IfofLaOeRnbBRHAOL4z0SexKkVOnQ/LGN/uDIIPGGBDYTvXgKZT+jbHeulRJ2jKgfSpGKN4JxFQ8uzVH492jEiiUJtT72Ss1dCV4PmyERVIw+f54itihV3z/t25dWgowhb0int8iC/OY3cGodlmYb3wdcQAAAIBuLbB45djZXzUkOTzzcRDIRfhaxo5WipbtEM2B1fuBt2gyrvksPpH/LK6xTjdIIb0CxPu4OCxwJG0aOz5kJoRnOWIXQGhH7VowrJhsqhIc8gN9ErbO5ea8b1L76MNcAotmBDeTUiPw01IJ8MdDxfmcsCslJKgoRKSmQpCwXQtN2g== tomk@hp2", 
+            "label": "mynewkey33"
+        }
+    ]
+    returned: always
+'''
 
 import os
 import uuid
@@ -93,8 +112,6 @@ try:
     import packet
 except ImportError:
     HAS_PACKET_SDK = False
-
-
 
 
 PACKET_API_TOKEN_ENV_VAR = "PACKET_API_TOKEN"
